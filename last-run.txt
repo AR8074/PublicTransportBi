@@ -1,0 +1,434 @@
+Microsoft Windows [Version 10.0.26200.9457]
+(c) Microsoft Corporation. All rights reserved.
+
+C:\Users\barak\OneDrive\Desktop\PublicTransportBI>.venv\Scripts\activate
+
+(.venv) C:\Users\barak\OneDrive\Desktop\PublicTransportBI>python explore_data.py
+Routes: (4611, 5)
+Trips: (47047, 4)
+Stops: (5580, 4)
+Stop times: (1360443, 5)
+
+Base GTFS records: 1000
+
+Operating days: 365
+Expanded records: 365000
+Traceback (most recent call last):
+  File "C:\Users\barak\OneDrive\Desktop\PublicTransportBI\explore_data.py", line 207, in <module>
+    * festival_multiplier
+      ^^^^^^^^^^^^^^^^^^^
+NameError: name 'festival_multiplier' is not defined. Did you mean: 'peak_multiplier'?
+
+(.venv) C:\Users\barak\OneDrive\Desktop\PublicTransportBI>python explore_data.py
+Routes: (4611, 5)
+Trips: (47047, 4)
+Stops: (5580, 4)
+Stop times: (1360443, 5)
+
+Base GTFS records: 1000
+
+Operating days: 365
+Expanded records: 365000
+
+========================================
+        DATASET SUMMARY
+========================================
+Total records: 365000
+Start date: 2026-01-01 00:00:00
+End date: 2026-12-31 00:00:00
+Number of days: 365
+Number of routes: 591
+Number of stops: 753
+Number of buses: 50
+Total passengers: 10481728
+Total revenue: 214809100
+Average delay: 4.72 minutes
+Average load factor: 57.33 %
+Overall OTP: 60.82 %
+
+========================================
+        SAMPLE FINAL DATA
+========================================
+  service_date day_of_week  hour  trip_id  ...  revenue   bus_id  load_factor  on_time
+0   2026-01-01    Thursday    13    71212  ...      510  MTC-027       127.50  Delayed
+1   2026-01-01    Thursday     8    95176  ...      940  MTC-025        94.00  Delayed
+2   2026-01-01    Thursday    10   117184  ...      700  MTC-027        70.00  Delayed
+3   2026-01-01    Thursday    14    47973  ...      800  MTC-005       100.00  Delayed
+4   2026-01-01    Thursday    10    36224  ...      500  MTC-016        50.00  On Time
+5   2026-01-01    Thursday    18   120302  ...     2150  MTC-009        86.00  On Time
+6   2026-01-01    Thursday    21    68147  ...      680  MTC-032        61.82  Delayed
+7   2026-01-01    Thursday     6    94760  ...      880  MTC-029       110.00  Delayed
+8   2026-01-01    Thursday    21    45907  ...      760  MTC-019        95.00  On Time
+9   2026-01-01    Thursday    18    58502  ...      600  MTC-007       109.09  Delayed
+
+[10 rows x 13 columns]
+
+========================================
+        MONTHLY SUMMARY
+========================================
+            total_passengers  total_revenue  average_delay  average_load_factor
+month_name                                                                     
+April                 857282       17603310           4.74                56.99
+August                892156       18342210           4.73                57.45
+December              898008       18486840           4.74                57.80
+February              800560       16386220           4.72                57.13
+January               897291       18401900           4.73                57.83
+July                  887392       18228720           4.70                57.19
+June                  858653       17633840           4.71                57.12
+March                 896578       18366420           4.76                57.80
+May                   882752       18057200           4.71                56.82
+November              856638       17533400           4.70                56.95
+October               895755       18251840           4.73                57.68
+September             858663       17517200           4.69                57.17
+
+Final operational data saved successfully.
+File: data/final_operational_data.csv
+Connected to MySQL successfully.
+C:\Users\barak\OneDrive\Desktop\PublicTransportBI\explore_data.py:480: UserWarning: pandas only supports SQLAlchemy connectable (engine/connection) or database string URI or sqlite3 DBAPI2 connection. Other DBAPI2 objects are not tested. Please consider using SQLAlchemy.
+  ml_data = pd.read_sql(query, connection)
+MySQL connection closed.
+
+========================================
+       ML FEATURE DATASET
+========================================
+Shape: (365000, 17)
+
+Columns:
+['service_date', 'route_id', 'stop_id', 'hour', 'day_of_week', 'day_type', 'month', 'is_weekend', 'is_holiday', 'is_festival', 'passengers', 'load_factor', 'delay_minutes', 'capacity', 'revenue', 'is_peak_hour', 'is_night_demand']
+
+First 5 rows:
+  service_date  route_id  stop_id  ...  revenue is_peak_hour is_night_demand
+0   2026-01-01     20966     6780  ...    600.0            0               0
+1   2026-01-01     17261     9197  ...    560.0            1               0
+2   2026-01-01     20581       83  ...    190.0            0               0
+3   2026-01-01     20984    10424  ...    500.0            0               0
+4   2026-01-01     22130     1461  ...    220.0            0               0
+
+[5 rows x 17 columns]
+
+========================================
+       HISTORICAL DEMAND
+========================================
+  service_date  route_id  stop_id  hour  passengers  historical_demand
+0   2026-01-01       938     6683    16          18          28.622068
+1   2026-01-02       938     6683    16          23          18.000000
+2   2026-01-03       938     6683    16          16          20.500000
+3   2026-01-04       938     6683    16          20          19.000000
+4   2026-01-05       938     6683    16          25          19.250000
+5   2026-01-06       938     6683    16          15          20.400000
+6   2026-01-07       938     6683    16          21          19.500000
+7   2026-01-08       938     6683    16          28          19.714286
+8   2026-01-09       938     6683    16          32          21.142857
+9   2026-01-10       938     6683    16          23          22.428571
+
+========================================
+       ML INPUT AND TARGET
+========================================
+X shape: (365000, 12)
+y shape: (365000,)
+
+Input features:
+   route_id  stop_id  hour  ... is_peak_hour is_night_demand  historical_demand
+0       938     6683    16  ...            0               0          28.622068
+1       938     6683    16  ...            0               0          18.000000
+2       938     6683    16  ...            0               0          20.500000
+3       938     6683    16  ...            0               0          19.000000
+4       938     6683    16  ...            0               0          19.250000
+
+[5 rows x 12 columns]
+
+Target values:
+0    18
+1    23
+2    16
+3    20
+4    25
+Name: passengers, dtype: int64
+
+========================================
+       TIME-BASED TRAIN / TEST SPLIT
+========================================
+Training records: 292000
+Testing records : 73000
+Training period : 2026-01-01 00:00:00 to 2026-10-19 00:00:00
+Testing period  : 2026-10-20 00:00:00 to 2026-12-31 00:00:00
+Training X: (292000, 19)
+Testing X : (73000, 19)
+Training y: (292000,)
+Testing y: (73000,)
+
+========================================
+       MODEL TRAINING
+========================================
+Random Forest model trained successfully!
+
+========================================
+       SAMPLE PREDICTIONS
+========================================
+Actual: 27 passengers | Predicted: 20.25 passengers
+Actual: 15 passengers | Predicted: 22.37 passengers
+Actual: 39 passengers | Predicted: 24.55 passengers
+Actual: 24 passengers | Predicted: 22.85 passengers
+Actual: 20 passengers | Predicted: 34.39 passengers
+Actual: 39 passengers | Predicted: 35.36 passengers
+Actual: 20 passengers | Predicted: 24.64 passengers
+Actual: 24 passengers | Predicted: 22.29 passengers
+Actual: 27 passengers | Predicted: 25.44 passengers
+Actual: 34 passengers | Predicted: 26.68 passengers
+
+========================================
+       MODEL EVALUATION
+========================================
+MAE  : 8.99
+RMSE : 10.76
+R²   : 0.2454
+
+========================================
+       TOP 15 FEATURE IMPORTANCE
+========================================
+                           feature  importance
+           remainder__is_peak_hour    0.429980
+      remainder__historical_demand    0.158487
+                remainder__stop_id    0.078906
+        remainder__is_night_demand    0.078175
+               remainder__route_id    0.076836
+                  remainder__month    0.072383
+                   remainder__hour    0.026559
+     categorical__day_type_Weekend    0.011837
+     categorical__day_type_Weekday    0.011144
+             remainder__is_weekend    0.009225
+            remainder__is_festival    0.006989
+             remainder__is_holiday    0.006882
+ categorical__day_of_week_Thursday    0.006170
+categorical__day_of_week_Wednesday    0.006078
+   categorical__day_of_week_Monday    0.006028
+
+========================================
+       DEMAND PREDICTION
+========================================
+Predicted passengers: 35
+
+========================================
+       CAPACITY RECOMMENDATION
+========================================
+Predicted passengers : 35
+Bus capacity         : 50
+Planned buses        : 1
+Planned capacity     : 50
+Capacity shortage    : 0
+Additional buses     : 0
+Recommendation       : Existing bus capacity is sufficient. No additional bus required.
+
+(.venv) C:\Users\barak\OneDrive\Desktop\PublicTransportBI>python -m streamlit run app.py
+2026-10-07 15:50:37.289 Uvicorn server started on :::8501
+
+  You can now view your Streamlit app in your browser.
+
+  Local URL: http://localhost:8501
+  Network URL: http://10.42.249.254:8501
+
+  Help agents write better Streamlit apps?
+  Install the official Streamlit skills by running streamlit skills in your terminal.
+
+Routes: (4611, 5)
+Trips: (47047, 4)
+Stops: (5580, 4)
+Stop times: (1360443, 5)
+
+Base GTFS records: 1000
+
+Operating days: 365
+Expanded records: 365000
+
+========================================
+        DATASET SUMMARY
+========================================
+Total records: 365000
+Start date: 2026-01-01 00:00:00
+End date: 2026-12-31 00:00:00
+Number of days: 365
+Number of routes: 591
+Number of stops: 753
+Number of buses: 50
+Total passengers: 10481728
+Total revenue: 214809100
+Average delay: 4.72 minutes
+Average load factor: 57.33 %
+Overall OTP: 60.82 %
+
+========================================
+        SAMPLE FINAL DATA
+========================================
+  service_date day_of_week  hour  trip_id  ...  revenue   bus_id  load_factor  on_time
+0   2026-01-01    Thursday    13    71212  ...      510  MTC-027       127.50  Delayed
+1   2026-01-01    Thursday     8    95176  ...      940  MTC-025        94.00  Delayed
+2   2026-01-01    Thursday    10   117184  ...      700  MTC-027        70.00  Delayed
+3   2026-01-01    Thursday    14    47973  ...      800  MTC-005       100.00  Delayed
+4   2026-01-01    Thursday    10    36224  ...      500  MTC-016        50.00  On Time
+5   2026-01-01    Thursday    18   120302  ...     2150  MTC-009        86.00  On Time
+6   2026-01-01    Thursday    21    68147  ...      680  MTC-032        61.82  Delayed
+7   2026-01-01    Thursday     6    94760  ...      880  MTC-029       110.00  Delayed
+8   2026-01-01    Thursday    21    45907  ...      760  MTC-019        95.00  On Time
+9   2026-01-01    Thursday    18    58502  ...      600  MTC-007       109.09  Delayed
+
+[10 rows x 13 columns]
+
+========================================
+        MONTHLY SUMMARY
+========================================
+            total_passengers  total_revenue  average_delay  average_load_factor
+month_name                                                                     
+April                 857282       17603310           4.74                56.99
+August                892156       18342210           4.73                57.45
+December              898008       18486840           4.74                57.80
+February              800560       16386220           4.72                57.13
+January               897291       18401900           4.73                57.83
+July                  887392       18228720           4.70                57.19
+June                  858653       17633840           4.71                57.12
+March                 896578       18366420           4.76                57.80
+May                   882752       18057200           4.71                56.82
+November              856638       17533400           4.70                56.95
+October               895755       18251840           4.73                57.68
+September             858663       17517200           4.69                57.17
+
+Final operational data saved successfully.
+File: data/final_operational_data.csv
+Connected to MySQL successfully.
+C:\Users\barak\OneDrive\Desktop\PublicTransportBI\explore_data.py:480: UserWarning: pandas only supports SQLAlchemy connectable (engine/connection) or database string URI or sqlite3 DBAPI2 connection. Other DBAPI2 objects are not tested. Please consider using SQLAlchemy.
+  ml_data = pd.read_sql(query, connection)
+MySQL connection closed.
+
+========================================
+       ML FEATURE DATASET
+========================================
+Shape: (365000, 17)
+
+Columns:
+['service_date', 'route_id', 'stop_id', 'hour', 'day_of_week', 'day_type', 'month', 'is_weekend', 'is_holiday', 'is_festival', 'passengers', 'load_factor', 'delay_minutes', 'capacity', 'revenue', 'is_peak_hour', 'is_night_demand']
+
+First 5 rows:
+  service_date  route_id  stop_id  ...  revenue is_peak_hour is_night_demand
+0   2026-01-01     20966     6780  ...    600.0            0               0
+1   2026-01-01     17261     9197  ...    560.0            1               0
+2   2026-01-01     20581       83  ...    190.0            0               0
+3   2026-01-01     20984    10424  ...    500.0            0               0
+4   2026-01-01     22130     1461  ...    220.0            0               0
+
+[5 rows x 17 columns]
+
+========================================
+       HISTORICAL DEMAND
+========================================
+  service_date  route_id  stop_id  hour  passengers  historical_demand
+0   2026-01-01       938     6683    16          18          28.622068
+1   2026-01-02       938     6683    16          23          18.000000
+2   2026-01-03       938     6683    16          16          20.500000
+3   2026-01-04       938     6683    16          20          19.000000
+4   2026-01-05       938     6683    16          25          19.250000
+5   2026-01-06       938     6683    16          15          20.400000
+6   2026-01-07       938     6683    16          21          19.500000
+7   2026-01-08       938     6683    16          28          19.714286
+8   2026-01-09       938     6683    16          32          21.142857
+9   2026-01-10       938     6683    16          23          22.428571
+
+========================================
+       ML INPUT AND TARGET
+========================================
+X shape: (365000, 12)
+y shape: (365000,)
+
+Input features:
+   route_id  stop_id  hour  ... is_peak_hour is_night_demand  historical_demand
+0       938     6683    16  ...            0               0          28.622068
+1       938     6683    16  ...            0               0          18.000000
+2       938     6683    16  ...            0               0          20.500000
+3       938     6683    16  ...            0               0          19.000000
+4       938     6683    16  ...            0               0          19.250000
+
+[5 rows x 12 columns]
+
+Target values:
+0    18
+1    23
+2    16
+3    20
+4    25
+Name: passengers, dtype: int64
+
+========================================
+       TIME-BASED TRAIN / TEST SPLIT
+========================================
+Training records: 292000
+Testing records : 73000
+Training period : 2026-01-01 00:00:00 to 2026-10-19 00:00:00
+Testing period  : 2026-10-20 00:00:00 to 2026-12-31 00:00:00
+Training X: (292000, 19)
+Testing X : (73000, 19)
+Training y: (292000,)
+Testing y: (73000,)
+
+========================================
+       MODEL TRAINING
+========================================
+Random Forest model trained successfully!
+
+========================================
+       SAMPLE PREDICTIONS
+========================================
+Actual: 27 passengers | Predicted: 20.25 passengers
+Actual: 15 passengers | Predicted: 22.37 passengers
+Actual: 39 passengers | Predicted: 24.55 passengers
+Actual: 24 passengers | Predicted: 22.85 passengers
+Actual: 20 passengers | Predicted: 34.39 passengers
+Actual: 39 passengers | Predicted: 35.36 passengers
+Actual: 20 passengers | Predicted: 24.64 passengers
+Actual: 24 passengers | Predicted: 22.29 passengers
+Actual: 27 passengers | Predicted: 25.44 passengers
+Actual: 34 passengers | Predicted: 26.68 passengers
+
+========================================
+       MODEL EVALUATION
+========================================
+MAE  : 8.99
+RMSE : 10.76
+R²   : 0.2454
+
+========================================
+       TOP 15 FEATURE IMPORTANCE
+========================================
+                           feature  importance
+           remainder__is_peak_hour    0.429980
+      remainder__historical_demand    0.158487
+                remainder__stop_id    0.078906
+        remainder__is_night_demand    0.078175
+               remainder__route_id    0.076836
+                  remainder__month    0.072383
+                   remainder__hour    0.026559
+     categorical__day_type_Weekend    0.011837
+     categorical__day_type_Weekday    0.011144
+             remainder__is_weekend    0.009225
+            remainder__is_festival    0.006989
+             remainder__is_holiday    0.006882
+ categorical__day_of_week_Thursday    0.006170
+categorical__day_of_week_Wednesday    0.006078
+   categorical__day_of_week_Monday    0.006028
+
+========================================
+       DEMAND PREDICTION
+========================================
+Predicted passengers: 35
+
+========================================
+       CAPACITY RECOMMENDATION
+========================================
+Predicted passengers : 35
+Bus capacity         : 50
+Planned buses        : 1
+Planned capacity     : 50
+Capacity shortage    : 0
+Additional buses     : 0
+Recommendation       : Existing bus capacity is sufficient. No additional bus required.
+  Stopping...
+
+(.venv) C:\Users\barak\OneDrive\Desktop\PublicTransportBI>
+
