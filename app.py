@@ -4,6 +4,8 @@ import numpy as np
 import math
 from datetime import datetime, date
 
+import transport_calendar
+
 # ============================================================
 # PAGE SETTINGS
 # ============================================================
@@ -54,21 +56,11 @@ def load_gtfs():
 
 
 routes, trips, stops, stop_times = load_gtfs()
-
-
 # ============================================================
-# LOAD ML MODEL
+# LOAD ML FUNCTIONS
 # ============================================================
 
-@st.cache_resource
-def load_ml_model():
-
-    import explore_data
-
-    return explore_data
-
-
-ml = load_ml_model()
+import ml_predictor as ml
 
 
 # ============================================================
@@ -629,87 +621,140 @@ def estimate_fare(from_stop, to_stop):
 # HOLIDAY / FESTIVAL
 # ============================================================
 
+CALENDAR = transport_calendar.TransportCalendar(
+    transport_calendar.load_calendar()
+)
+
+
+# ============================================================
+# PREBUILT LOOKUP TABLES
+# ============================================================
+# The previous implementation copied the whole 77 MB feature table
+# on every lookup. These indexes are built once and answer the same
+# questions without touching a per-request copy.
+
+@st.cache_resource
+def build_history_index():
+
+    frame = ml.ml_data.copy()
+
+    frame["route_key"] = frame["route_id"].astype(str)
+    frame["stop_key"] = frame["stop_id"].astype(str)
+
+    series = {}
+
+    for key, group in frame.groupby(
+        ["route_key", "stop_key", "hour"]
+    ):
+        ordered = group.sort_values("service_date")
+        series[key] = {
+            "dates": ordered["service_date"].to_numpy(),
+            "values": ordered["passengers"].to_numpy(dtype=float),
+        }
+
+    return {
+        "series": series,
+        "fallback": float(frame["passengers"].mean()),
+    }
+
+
+ML_HISTORY = build_history_index()
+
+
+@st.cache_resource
+def build_operational_index():
+
+    frame = ml.ml_data.copy()
+
+    frame["route_key"] = frame["route_id"].astype(str)
+    frame["stop_key"] = frame["stop_id"].astype(str)
+
+    exact = (
+        frame.groupby(["service_date", "route_key", "stop_key", "hour"])[
+            "delay_minutes"
+        ]
+        .mean()
+    )
+
+    by_route_hour = (
+        frame.groupby(["route_key", "hour"])["delay_minutes"].mean()
+    )
+
+    return {
+        "exact": exact,
+        "by_route_hour": by_route_hour,
+        "overall": float(frame["delay_minutes"].mean()),
+    }
+
+
+OPERATIONAL_INDEX = build_operational_index()
+
+
+@st.cache_resource
+def get_modal_capacity():
+
+    capacity = pd.to_numeric(
+        ml.ml_data["capacity"],
+        errors="coerce",
+    ).dropna()
+
+    if capacity.empty:
+        return 50
+
+    return int(capacity.mode().iloc[0])
+
+
+ML_MODAL_CAPACITY = get_modal_capacity()
+
+
 def get_calendar_information(
     selected_date
 ):
 
     date_value = pd.Timestamp(
         selected_date
+    ).normalize()
+
+    is_holiday = CALENDAR.is_holiday(
+        date_value
     )
 
-    data = ml.ml_data.copy()
-
-    data["service_date"] = pd.to_datetime(
-        data["service_date"]
-    )
-
-    date_data = data[
-        data["service_date"] == date_value
-    ]
-
-    if date_data.empty:
-
-        return 0, 0
-
-    is_holiday = int(
-        date_data["is_holiday"]
-        .max()
-    )
-
-    is_festival = int(
-        date_data["is_festival"]
-        .max()
+    is_festival = CALENDAR.is_festival(
+        date_value
     )
 
     return is_holiday, is_festival
+
+
+def get_event_name(
+    selected_date
+):
+
+    return CALENDAR.event_name(
+        pd.Timestamp(selected_date).normalize()
+    )
 
 
 # ============================================================
 # HISTORICAL DEMAND
 # ============================================================
 
-def get_historical_demand(
-    route_id,
-    stop_id,
-    hour,
-    selected_date
-):
+@st.cache_data
+def get_historical_demand(route_id, stop_id, hour, selected_date):
+    target = pd.Timestamp(selected_date).normalize()
 
-    data = ml.ml_data.copy()
-
-    data["service_date"] = pd.to_datetime(
-        data["service_date"]
+    history = ML_HISTORY["series"].get(
+        (str(route_id), str(stop_id), int(hour))
     )
 
-    history = data[
-        (data["route_id"].astype(str)
-         == str(route_id))
-        &
-        (data["stop_id"].astype(str)
-         == str(stop_id))
-        &
-        (data["hour"] == hour)
-        &
-        (
-            data["service_date"]
-            < pd.Timestamp(selected_date)
-        )
-    ]
+    if history is None:
+        return ML_HISTORY["fallback"]
 
-    if history.empty:
-        return float(
-            data["passengers"].mean()
-        )
+    earlier = history["dates"] < target
+    if not earlier.any():
+        return ML_HISTORY["fallback"]
 
-    history = history.sort_values(
-        "service_date"
-    )
-
-    return float(
-        history["passengers"]
-        .tail(7)
-        .mean()
-    )
+    return float(history["values"][earlier][-7:].mean())
 
 
 # ============================================================
@@ -841,74 +886,36 @@ if search:
     # DELAY INFORMATION
     # --------------------------------------------------------
 
-    operational = ml.ml_data.copy()
-
-    operational["service_date"] = (
-        pd.to_datetime(
-            operational["service_date"]
-        )
+    delay_key = (
+        pd.Timestamp(selected_date).normalize().to_datetime64(),
+        str(route_id),
+        str(from_stop),
+        int(hour),
     )
 
-    matching_operation = operational[
-        (
-            operational["service_date"]
-            == pd.Timestamp(selected_date)
-        )
-        &
-        (
-            operational["route_id"].astype(str)
-            == str(route_id)
-        )
-        &
-        (
-            operational["stop_id"].astype(str)
-            == str(from_stop)
-        )
-        &
-        (
-            operational["hour"]
-            == hour
-        )
-    ]
+    exact_key = (
+        pd.Timestamp(selected_date).normalize(),
+        str(route_id),
+        str(from_stop),
+        int(hour),
+    )
 
-
-    if not matching_operation.empty:
-
+    if exact_key in OPERATIONAL_INDEX["exact"].index:
         delay = float(
-            matching_operation[
-                "delay_minutes"
-            ].mean()
+            OPERATIONAL_INDEX["exact"].loc[exact_key]
+        )
+
+    elif (str(route_id), int(hour)) in OPERATIONAL_INDEX[
+        "by_route_hour"
+    ].index:
+        delay = float(
+            OPERATIONAL_INDEX["by_route_hour"].loc[
+                (str(route_id), int(hour))
+            ]
         )
 
     else:
-
-        route_hour_data = operational[
-            (
-                operational["route_id"].astype(str)
-                == str(route_id)
-            )
-            &
-            (
-                operational["hour"]
-                == hour
-            )
-        ]
-
-        if not route_hour_data.empty:
-
-            delay = float(
-                route_hour_data[
-                    "delay_minutes"
-                ].mean()
-            )
-
-        else:
-
-            delay = float(
-                operational[
-                    "delay_minutes"
-                ].mean()
-            )
+        delay = float(OPERATIONAL_INDEX["overall"])
 
 
     on_time = (
@@ -936,44 +943,35 @@ if search:
     # ML DEMAND PREDICTION
     # --------------------------------------------------------
 
-    predicted_passengers = ml.predict_demand(
+    event_name = get_event_name(selected_date)
 
+    explanation = ml.explain_demand(
         route_id=int(route_id),
-
         stop_id=int(from_stop),
-
         hour=hour,
-
         day_of_week=selected_day,
-
         day_type=day_type,
-
         month=month,
-
         is_weekend=is_weekend,
-
         is_holiday=is_holiday,
-
         is_festival=is_festival,
-
         is_peak_hour=is_peak_hour,
-
         is_night_demand=is_night_demand,
-
-        historical_demand=historical_demand
+        historical_demand=historical_demand,
+        event_name=event_name,
     )
-
     predicted_passengers = max(
         0,
-        round(predicted_passengers)
+        round(explanation["prediction"])
     )
-
 
     # --------------------------------------------------------
     # CAPACITY
     # --------------------------------------------------------
 
-    bus_capacity = 50
+    # Taken from the fleet rather than hardcoded, so a festival peak
+    # that genuinely needs a second bus is visible.
+    bus_capacity = ML_MODAL_CAPACITY
 
     required_buses = max(
         1,
@@ -1221,3 +1219,58 @@ if search:
         st.success(
             "✅ Existing bus capacity is sufficient."
         )
+
+
+    # --------------------------------------------------------
+    # REASONING
+    # --------------------------------------------------------
+
+    st.subheader("🧠 Why This Number")
+
+    if event_name != "Regular day":
+
+        st.info(
+            f"📅 **{event_name}**"
+        )
+
+    st.write(explanation["festival_summary"])
+
+    if explanation["drivers"]:
+
+        driver_frame = pd.DataFrame(
+            explanation["drivers"]
+        )
+
+        driver_frame["feature"] = driver_frame["feature"].map(
+            lambda name: ml.FEATURE_LABELS.get(name, name)
+        )
+
+        st.dataframe(
+            driver_frame[
+                ["feature", "with", "without", "delta"]
+            ].round(2),
+            hide_index=True,
+            use_container_width=True,
+        )
+
+        st.caption(
+            "Each row re-runs the model with one driver switched "
+            "off. The delta is how many passengers that driver "
+            "is responsible for."
+        )
+
+    festival_bar = ml.feature_importance
+
+    if festival_bar is not None:
+
+        with st.expander("Model-wide feature importance"):
+
+            st.dataframe(
+                festival_bar.head(12).round(4),
+                hide_index=True,
+                use_container_width=True,
+            )
+    st.caption(
+    f"Model accuracy: MAE {ml.mae:.2f} · "
+    f"R² {ml.r2:.3f}"
+)

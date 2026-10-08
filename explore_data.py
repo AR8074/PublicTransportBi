@@ -8,6 +8,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import math
+import os
+import joblib
 
 
 # ============================================================
@@ -131,6 +133,24 @@ sample_data["day_type"] = np.where(
     "Weekday"
 )
 
+# Synthetic prototype calendar flags.
+# These are assumptions for demonstration, not actual MTC demand statistics.
+holiday_dates = pd.to_datetime([
+    "2026-01-01", "2026-01-14", "2026-01-26", "2026-02-03",
+    "2026-03-19", "2026-03-21", "2026-04-03", "2026-04-14",
+    "2026-05-01", "2026-05-27", "2026-06-17", "2026-08-15",
+    "2026-08-26", "2026-09-04", "2026-09-14", "2026-10-02",
+    "2026-10-20", "2026-10-21", "2026-11-08", "2026-12-25"
+])
+
+festival_dates = pd.to_datetime([
+    "2026-01-14", "2026-03-19", "2026-04-14", "2026-08-26",
+    "2026-09-04", "2026-10-20", "2026-10-21", "2026-11-08"
+])
+
+sample_data["is_holiday"] = pd.to_datetime(sample_data["service_date"]).isin(holiday_dates).astype(int)
+sample_data["is_festival"] = pd.to_datetime(sample_data["service_date"]).isin(festival_dates).astype(int)
+
 
 # ============================================================
 # 11. DEMAND PATTERN FEATURES
@@ -177,7 +197,6 @@ peak_multiplier = np.where(
     1.0
 )
 
-
 weekend_multiplier = np.where(
     sample_data["day_of_week"] == "Saturday",
     0.90,
@@ -196,29 +215,7 @@ month_multiplier = np.where(
     1.10,
     1.0
 )
-# ------------------------------------------------------------
-# Festival demand
-# ------------------------------------------------------------
 
-festival_dates = pd.to_datetime([
-    "2026-01-01",
-    "2026-03-20",
-    "2026-08-15",
-    "2026-10-02",
-    "2026-12-25"
-])
-
-sample_data["is_festival"] = np.where(
-    pd.to_datetime(sample_data["service_date"]).isin(festival_dates),
-    1,
-    0
-)
-
-festival_multiplier = np.where(
-    sample_data["is_festival"] == 1,
-    1.40,
-    1.0
-)
 random_variation = np.random.uniform(0.85, 1.15, size=len(sample_data))
 
 sample_data["passengers"] = (
@@ -226,7 +223,9 @@ sample_data["passengers"] = (
     * peak_multiplier
     * weekend_multiplier
     * night_multiplier
-    * festival_multiplier
+    * month_multiplier
+    * np.where(sample_data["is_holiday"] == 1, 1.25, 1.0)
+    * np.where(sample_data["is_festival"] == 1, 1.40, 1.0)
     * random_variation
 ).round().astype(int)
 
@@ -457,37 +456,14 @@ print("File: data/final_operational_data.csv")
 
 
 # ============================================================
-# 27. LOAD ML DATA FROM MYSQL OR FALLBACK TO SAMPLE DATA
+# 27. PREPARE ML DATA
 # ============================================================
 
-connection = None
+# Use the freshly generated operational dataset for ML so the synthetic
+# holiday/festival demand effects above are included in training.
+ml_data = sample_data.copy()
 
-try:
-    connection = mysql.connector.connect(
-        host="127.0.0.1",
-        user="root",
-        password="22@Ar200",
-        database="PublicTransportBI"
-    )
-
-    if connection.is_connected():
-        print("Connected to MySQL successfully.")
-
-    query = """
-    SELECT *
-    FROM ml_transport_features
-    """
-    ml_data = pd.read_sql(query, connection)
-
-except Exception as err:
-    print(f"MySQL connection failed: {err}")
-    print("Using generated operational dataset as fallback.")
-    ml_data = sample_data.copy()
-
-finally:
-    if connection is not None and connection.is_connected():
-        connection.close()
-        print("MySQL connection closed.")
+print("\nML training data source: generated operational dataset")
 
 
 # ============================================================
@@ -514,26 +490,6 @@ if "is_weekend" not in ml_data.columns:
         0
     )
 
-if "is_holiday" not in ml_data.columns:
-    holiday_dates = pd.to_datetime([
-        "2026-01-01", "2026-02-14", "2026-03-20", "2026-05-01",
-        "2026-08-15", "2026-10-02", "2026-12-25"
-    ])
-    ml_data["is_holiday"] = np.where(
-        pd.to_datetime(ml_data["service_date"]).isin(holiday_dates),
-        1,
-        0
-    )
-
-if "is_festival" not in ml_data.columns:
-    festival_dates = pd.to_datetime([
-        "2026-01-01", "2026-03-20", "2026-08-15", "2026-10-02", "2026-12-25"
-    ])
-    ml_data["is_festival"] = np.where(
-        pd.to_datetime(ml_data["service_date"]).isin(festival_dates),
-        1,
-        0
-    )
 
 ml_data["is_peak_hour"] = np.where(
     ((ml_data["hour"] >= 7) & (ml_data["hour"] <= 9)) |
@@ -606,7 +562,7 @@ target_column = "passengers"
 
 for col in ["route_id", "stop_id"]:
     if col in ml_data.columns:
-        ml_data[col] = ml_data[col].astype(int)
+        ml_data[col] = pd.to_numeric(ml_data[col], errors="coerce")
 
 X = ml_data[feature_columns]
 y = ml_data[target_column]
@@ -668,8 +624,9 @@ print("Testing y:", y_test.shape)
 # ============================================================
 
 model = RandomForestRegressor(
-    n_estimators=50,
-    max_depth=20,
+    n_estimators=30,
+    max_depth=16,
+    max_samples=0.7,
     random_state=42,
     n_jobs=-1
 )
@@ -725,7 +682,30 @@ print(feature_importance.head(15).to_string(index=False))
 
 
 # ============================================================
-# 35. DEMAND PREDICTION FUNCTION
+# 35. SAVE TRAINED MODEL
+# ============================================================
+
+os.makedirs("models", exist_ok=True)
+
+model_package = {
+    "model": model,
+    "preprocessor": preprocessor,
+    "feature_columns": feature_columns
+}
+
+joblib.dump(
+    model_package,
+    "models/demand_model.pkl"
+)
+
+print("\n========================================")
+print("       MODEL SAVED")
+print("========================================")
+print("File: models/demand_model.pkl")
+
+
+# ============================================================
+# 36. DEMAND PREDICTION FUNCTION
 # ============================================================
 
 def predict_demand(
@@ -745,25 +725,196 @@ def predict_demand(
     input_data = pd.DataFrame([{
         "route_id": int(route_id),
         "stop_id": int(stop_id),
-        "hour": hour,
+        "hour": int(hour),
         "day_of_week": day_of_week,
         "day_type": day_type,
-        "month": month,
-        "is_weekend": is_weekend,
-        "is_holiday": is_holiday,
-        "is_festival": is_festival,
-        "is_peak_hour": is_peak_hour,
-        "is_night_demand": is_night_demand,
-        "historical_demand": historical_demand
+        "month": int(month),
+        "is_weekend": int(is_weekend),
+        "is_holiday": int(is_holiday),
+        "is_festival": int(is_festival),
+        "is_peak_hour": int(is_peak_hour),
+        "is_night_demand": int(is_night_demand),
+        "historical_demand": float(historical_demand)
     }])
 
-    input_encoded = preprocessor.transform(input_data[feature_columns])
-    prediction = model.predict(input_encoded)
-    return prediction[0]
+    # Apply the exact same preprocessing used during model training.
+    input_encoded = preprocessor.transform(
+        input_data[feature_columns]
+    )
+
+    prediction = float(
+        model.predict(input_encoded)[0]
+    )
+
+    # The synthetic holiday/festival uplift is already present in the
+    # training data, so do NOT multiply the prediction again here.
+    return max(0, prediction)
 
 
 # ============================================================
-# 36. TEST DEMAND PREDICTION
+# 37. DEMAND EXPLANATION
+# ============================================================
+
+FEATURE_LABELS = {
+    "is_festival": "Festival effect",
+    "is_holiday": "Holiday effect",
+    "is_peak_hour": "Peak-hour effect",
+    "is_night_demand": "Night-demand effect",
+    "is_weekend": "Weekend effect",
+    "historical_demand": "Historical demand",
+    "hour": "Time of day",
+    "month": "Month/season"
+}
+
+ml_mean_demand = float(
+    ml_data["passengers"].mean()
+)
+
+
+def explain_demand(
+    route_id,
+    stop_id,
+    hour,
+    day_of_week,
+    day_type,
+    month,
+    is_weekend,
+    is_holiday,
+    is_festival,
+    is_peak_hour,
+    is_night_demand,
+    historical_demand,
+    event_name="Regular day"
+):
+    prediction = predict_demand(
+        route_id=route_id,
+        stop_id=stop_id,
+        hour=hour,
+        day_of_week=day_of_week,
+        day_type=day_type,
+        month=month,
+        is_weekend=is_weekend,
+        is_holiday=is_holiday,
+        is_festival=is_festival,
+        is_peak_hour=is_peak_hour,
+        is_night_demand=is_night_demand,
+        historical_demand=historical_demand
+    )
+
+    feature_values = {
+        "route_id": int(route_id),
+        "stop_id": int(stop_id),
+        "hour": int(hour),
+        "day_of_week": day_of_week,
+        "day_type": day_type,
+        "month": int(month),
+        "is_weekend": int(is_weekend),
+        "is_holiday": int(is_holiday),
+        "is_festival": int(is_festival),
+        "is_peak_hour": int(is_peak_hour),
+        "is_night_demand": int(is_night_demand),
+        "historical_demand": float(historical_demand)
+    }
+
+    drivers = []
+
+    driver_features = [
+        "is_festival",
+        "is_holiday",
+        "is_peak_hour",
+        "is_night_demand",
+        "is_weekend",
+        "historical_demand",
+        "hour",
+        "month"
+    ]
+
+    for feature in driver_features:
+        modified_values = feature_values.copy()
+
+        if feature in [
+            "is_festival",
+            "is_holiday",
+            "is_peak_hour",
+            "is_night_demand",
+            "is_weekend"
+        ]:
+            modified_values[feature] = 0
+        elif feature == "historical_demand":
+            modified_values[feature] = ml_mean_demand
+        elif feature == "hour":
+            modified_values[feature] = 12
+        elif feature == "month":
+            modified_values[feature] = 6
+
+        without_value = predict_demand(
+            route_id=modified_values["route_id"],
+            stop_id=modified_values["stop_id"],
+            hour=modified_values["hour"],
+            day_of_week=modified_values["day_of_week"],
+            day_type=modified_values["day_type"],
+            month=modified_values["month"],
+            is_weekend=modified_values["is_weekend"],
+            is_holiday=modified_values["is_holiday"],
+            is_festival=modified_values["is_festival"],
+            is_peak_hour=modified_values["is_peak_hour"],
+            is_night_demand=modified_values["is_night_demand"],
+            historical_demand=modified_values["historical_demand"]
+        )
+
+        delta = prediction - without_value
+
+        drivers.append({
+            "feature": feature,
+            "with": round(prediction, 2),
+            "without": round(without_value, 2),
+            "delta": round(delta, 2)
+        })
+
+    drivers = sorted(
+        drivers,
+        key=lambda x: abs(x["delta"]),
+        reverse=True
+    )
+
+    if is_festival == 1:
+        festival_summary = (
+            f"Festival day detected: {event_name}. "
+            "Festival demand is expected to be higher than a regular day."
+        )
+    elif is_holiday == 1:
+        festival_summary = (
+            f"Holiday detected: {event_name}. "
+            "Passenger demand may differ from a normal working day."
+        )
+    else:
+        festival_summary = (
+            "Regular day detected. "
+            "Demand is estimated using time, day type, route, stop "
+            "and historical demand patterns."
+        )
+
+    return {
+        "prediction": prediction,
+        "festival_summary": festival_summary,
+        "drivers": drivers
+    }
+
+
+# ============================================================
+# 38. MODEL PERFORMANCE INFORMATION
+# ============================================================
+
+test_festival_dates = int(
+    test_data.loc[
+        test_data["is_festival"] == 1,
+        "service_date"
+    ].nunique()
+)
+
+
+# ============================================================
+# 39. TEST DEMAND PREDICTION
 # ============================================================
 
 predicted_passengers = predict_demand(
@@ -781,14 +932,14 @@ predicted_passengers = predict_demand(
     historical_demand=30
 )
 
-print("\n========================================")
+print("\\n========================================")
 print("       DEMAND PREDICTION")
 print("========================================")
 print(f"Predicted passengers: {predicted_passengers:.0f}")
 
 
 # ============================================================
-# 37. CAPACITY PLANNING
+# 40. CAPACITY PLANNING
 # ============================================================
 
 bus_capacity = 50
@@ -806,7 +957,7 @@ else:
         "Existing bus capacity is sufficient. No additional bus required."
     )
 
-print("\n========================================")
+print("\\n========================================")
 print("       CAPACITY RECOMMENDATION")
 print("========================================")
 print(f"Predicted passengers : {predicted_passengers:.0f}")
